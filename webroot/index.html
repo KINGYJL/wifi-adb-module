@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Wi-Fi ADB</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #0a0a0a;
+  --card: #141414;
+  --border: #222;
+  --text: #e0e0e0;
+  --text2: #888;
+  --green: #00e676;
+  --red: #ff5252;
+  --blue: #448aff;
+  --yellow: #ffd740;
+}
+body {
+  font-family: -apple-system, 'Noto Sans SC', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  padding: 16px;
+  padding-bottom: 32px;
+}
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  padding: 16px;
+  background: var(--card);
+  border-radius: 16px;
+  border: 1px solid var(--border);
+}
+.header-icon { font-size: 32px; }
+.header-text h1 { font-size: 18px; font-weight: 600; }
+.header-text p { font-size: 12px; color: var(--text2); margin-top: 2px; }
+
+.card {
+  background: var(--card);
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  padding: 16px;
+  margin-bottom: 12px;
+}
+.card-title {
+  font-size: 13px;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 12px;
+}
+
+/* Status */
+.status-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+}
+.status-row + .status-row { border-top: 1px solid var(--border); }
+.status-label { font-size: 14px; color: var(--text2); }
+.status-value { font-size: 14px; font-weight: 500; }
+.status-value.running { color: var(--green); }
+.status-value.stopped { color: var(--red); }
+.status-value.disabled { color: var(--yellow); }
+
+/* Toggle */
+.toggle-area {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+}
+.toggle-label { font-size: 16px; font-weight: 500; }
+.switch {
+  position: relative;
+  width: 52px;
+  height: 28px;
+}
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: #333;
+  border-radius: 28px;
+  transition: 0.3s;
+}
+.slider::before {
+  content: "";
+  position: absolute;
+  height: 22px; width: 22px;
+  left: 3px; bottom: 3px;
+  background: white;
+  border-radius: 50%;
+  transition: 0.3s;
+}
+input:checked + .slider { background: var(--green); }
+input:checked + .slider::before { transform: translateX(24px); }
+
+/* Port input */
+.port-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+.port-input {
+  flex: 1;
+  background: #1a1a1a;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  color: var(--text);
+  font-size: 15px;
+  outline: none;
+}
+.port-input:focus { border-color: var(--blue); }
+.btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 0.2s;
+}
+.btn:active { transform: scale(0.96); }
+.btn-primary { background: var(--blue); color: white; }
+.btn-danger { background: var(--red); color: white; }
+.btn-sm { padding: 6px 14px; font-size: 12px; }
+
+/* Connect */
+.connect-box {
+  background: #0d1117;
+  border: 1px solid #1e3a5f;
+  border-radius: 12px;
+  padding: 14px;
+  margin-top: 8px;
+}
+.connect-cmd {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  color: var(--green);
+  word-break: break-all;
+  user-select: all;
+  -webkit-user-select: all;
+}
+.connect-hint {
+  font-size: 11px;
+  color: var(--text2);
+  margin-top: 6px;
+}
+
+/* Log */
+.log-area {
+  background: #0d0d0d;
+  border-radius: 10px;
+  padding: 12px;
+  max-height: 300px;
+  overflow-y: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #aaa;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.log-area::-webkit-scrollbar { width: 4px; }
+.log-area::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+
+/* Commands */
+.cmd-list { list-style: none; }
+.cmd-item {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.cmd-item:last-child { border-bottom: none; }
+.cmd-name {
+  font-size: 12px;
+  color: var(--text2);
+  margin-bottom: 4px;
+}
+.cmd-code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  color: var(--blue);
+  background: #0d1117;
+  padding: 6px 10px;
+  border-radius: 6px;
+  display: block;
+  user-select: all;
+  -webkit-user-select: all;
+  word-break: break-all;
+}
+
+/* Refresh */
+.refresh-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(80px);
+  background: #333;
+  color: white;
+  padding: 10px 24px;
+  border-radius: 24px;
+  font-size: 14px;
+  transition: 0.3s;
+  z-index: 999;
+  pointer-events: none;
+}
+.toast.show { transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-icon">📶</div>
+  <div class="header-text">
+    <h1>Wi-Fi ADB</h1>
+    <p>无线调试管理</p>
+  </div>
+</div>
+
+<!-- Toggle -->
+<div class="card">
+  <div class="toggle-area">
+    <span class="toggle-label">Wi-Fi ADB</span>
+    <label class="switch">
+      <input type="checkbox" id="toggleSwitch" onchange="toggleModule()">
+      <span class="slider"></span>
+    </label>
+  </div>
+  <div class="port-row">
+    <input type="number" class="port-input" id="portInput" placeholder="端口" value="5555">
+    <button class="btn btn-primary btn-sm" onclick="savePort()">保存端口</button>
+  </div>
+</div>
+
+<!-- Status -->
+<div class="card">
+  <div class="card-title">状态</div>
+  <div class="status-row">
+    <span class="status-label">运行状态</span>
+    <span class="status-value" id="stateText">--</span>
+  </div>
+  <div class="status-row">
+    <span class="status-label">IP 地址</span>
+    <span class="status-value" id="ipText">--</span>
+  </div>
+  <div class="status-row">
+    <span class="status-label">端口</span>
+    <span class="status-value" id="portText">--</span>
+  </div>
+  <div class="status-row">
+    <span class="status-label">最后更新</span>
+    <span class="status-value" id="updatedText" style="font-size:12px;color:#666">--</span>
+  </div>
+</div>
+
+<!-- Connect -->
+<div class="card">
+  <div class="card-title">连接</div>
+  <div class="connect-box">
+    <div class="connect-cmd" id="connectCmd">adb connect --:--</div>
+    <div class="connect-hint">长按复制命令 · 电脑端执行连接</div>
+  </div>
+</div>
+
+<!-- Log -->
+<div class="card">
+  <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+    <span>运行日志</span>
+    <button class="btn btn-sm" style="background:#222;color:#aaa" onclick="loadLog()">刷新</button>
+  </div>
+  <div class="log-area" id="logArea">加载中...</div>
+</div>
+
+<!-- Commands -->
+<div class="card">
+  <div class="card-title">ADB 常用命令</div>
+  <ul class="cmd-list">
+    <li class="cmd-item">
+      <div class="cmd-name">连接设备</div>
+      <code class="cmd-code">adb connect &lt;ip&gt;:&lt;port&gt;</code>
+    </li>
+    <li class="cmd-item">
+      <div class="cmd-name">断开连接</div>
+      <code class="cmd-code">adb disconnect</code>
+    </li>
+    <li class="cmd-item">
+      <div class="cmd-name">查看已连接设备</div>
+      <code class="cmd-code">adb devices</code>
+    </li>
+    <li class="cmd-item">
+      <div class="cmd-name">安装 APK</div>
+      <code class="cmd-code">adb install app.apk</code>
+    </li>
+    <li class="cmd-item">
+      <div class="cmd-name">卸载应用</div>
+      <code class="cmd-code">adb uninstall &lt;包名&gt;</code>
+    </li>
+    <li class="cmd-item">
+      <div class="cmd-name">推送文件到手机</div>
+      <code class="cmd-code">adb push local.txt /sdcard/</code>
+    </li>
+    <li class="cmd-item">
+      <div class="cmd-name">从手机拉取文件</div>
+      <code class="cmd-code">adb pull /sdcard/file.txt ./</code>
+    </li>
+    <li class="cmd-item">
+      <div class="cmd-name">截屏</div>
+      <code class="cmd-code">adb shell screencap /sdcard/screen.png</code>
+    </li>
+    <li class="cmd-item">
+      <div class="cmd-name">录屏</div>
+      <code class="cmd-code">adb shell screenrecord /sdcard/video.mp4</code>
+    </li>
+    <li class="cmd-item">
+      <div class="cmd-name">查看日志</div>
+      <code class="cmd-code">adb logcat</code>
+    </li>
+    <li class="cmd-item">
+      <div class="cmd-name">进入 Shell</div>
+      <code class="cmd-code">adb shell</code>
+    </li>
+    <li class="cmd-item">
+      <div class="cmd-name">重启设备</div>
+      <code class="cmd-code">adb reboot</code>
+    </li>
+    <li class="cmd-item">
+      <div class="cmd-name">重启到 Recovery</div>
+      <code class="cmd-code">adb reboot recovery</code>
+    </li>
+    <li class="cmd-item">
+      <div class="cmd-name">查看系统属性</div>
+      <code class="cmd-code">adb shell getprop ro.build.display.id</code>
+    </li>
+    <li class="cmd-item">
+      <div class="cmd-name">查看已安装应用</div>
+      <code class="cmd-code">adb shell pm list packages</code>
+    </li>
+  </ul>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const MODDIR = '/data/adb/modules/wifi-adb';
+const STATUS_URL = './status.json';
+const LOG_URL = './log.txt';
+const CONFIG_URL = './config';
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+async function loadStatus() {
+  try {
+    const r = await fetch(STATUS_URL + '?t=' + Date.now());
+    if (!r.ok) return;
+    const s = await r.json();
+    
+    const stateEl = document.getElementById('stateText');
+    stateEl.textContent = s.state === 'running' ? '运行中' : s.state === 'stopped' ? '已停止' : '已禁用';
+    stateEl.className = 'status-value ' + s.state;
+    
+    document.getElementById('ipText').textContent = s.ip || '未连接';
+    document.getElementById('portText').textContent = s.port || '--';
+    document.getElementById('updatedText').textContent = s.updated || '--';
+    document.getElementById('portInput').value = s.port || 5555;
+    
+    const toggle = document.getElementById('toggleSwitch');
+    toggle.checked = s.enabled === 1;
+    
+    if (s.ip && s.state === 'running') {
+      document.getElementById('connectCmd').textContent = 'adb connect ' + s.ip + ':' + s.port;
+    }
+  } catch(e) {}
+}
+
+async function loadLog() {
+  try {
+    const r = await fetch(LOG_URL + '?t=' + Date.now());
+    if (r.ok) {
+      const text = await r.text();
+      const area = document.getElementById('logArea');
+      area.textContent = text || '暂无日志';
+      area.scrollTop = area.scrollHeight;
+    }
+  } catch(e) {
+    document.getElementById('logArea').textContent = '日志加载失败';
+  }
+}
+
+async function loadConfig() {
+  try {
+    const r = await fetch(CONFIG_URL + '?t=' + Date.now());
+    if (r.ok) {
+      const text = await r.text();
+      const match = text.match(/ADB_PORT=(\d+)/);
+      if (match) document.getElementById('portInput').value = match[1];
+      const toggle = document.getElementById('toggleSwitch');
+      toggle.checked = !text.includes('ENABLED=0');
+    }
+  } catch(e) {}
+}
+
+function toggleModule() {
+  const enabled = document.getElementById('toggleSwitch').checked ? 1 : 0;
+  const cmd = 'sed -i "s/ENABLED=.*/ENABLED=' + enabled + '/" ' + MODDIR + '/config';
+  if (typeof ksu !== 'undefined') {
+    ksu.exec(cmd);
+    toast(enabled ? '已启用' : '已禁用');
+    setTimeout(loadStatus, 2000);
+  } else {
+    toast('需要在 KSU 管理器中操作');
+    document.getElementById('toggleSwitch').checked = !document.getElementById('toggleSwitch').checked;
+  }
+}
+
+function savePort() {
+  const port = document.getElementById('portInput').value;
+  if (!port || port < 1 || port > 65535) {
+    toast('端口无效');
+    return;
+  }
+  const cmd = 'sed -i "s/ADB_PORT=.*/ADB_PORT=' + port + '/" ' + MODDIR + '/config';
+  if (typeof ksu !== 'undefined') {
+    ksu.exec(cmd);
+    toast('端口已保存: ' + port);
+    setTimeout(loadStatus, 2000);
+  } else {
+    toast('需要在 KSU 管理器中操作');
+  }
+}
+
+// Init
+loadConfig();
+loadStatus();
+loadLog();
+setInterval(loadStatus, 10000);
+setInterval(loadLog, 30000);
+</script>
+</body>
+</html>
