@@ -67,6 +67,7 @@ body {
 .status-value.running { color: var(--green); }
 .status-value.stopped { color: var(--red); }
 .status-value.disabled { color: var(--yellow); }
+.status-value.error { color: var(--red); }
 
 /* Toggle */
 .toggle-area {
@@ -198,13 +199,7 @@ input:checked + .slider::before { transform: translateX(24px); }
   word-break: break-all;
 }
 
-/* Refresh */
-.refresh-bar {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 8px;
-}
-
+/* Toast */
 .toast {
   position: fixed;
   bottom: 24px;
@@ -361,43 +356,76 @@ const STATUS_URL = './status.json';
 const LOG_URL = './log.txt';
 const CONFIG_URL = './config';
 
-function toast(msg) {
+function toast(msg, duration) {
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 2000);
+  setTimeout(function() { t.classList.remove('show'); }, duration || 2000);
+}
+
+// 通过 control.sh 执行命令（支持 KSU 和 Magisk）
+function execCtrl(args) {
+  return new Promise(function(resolve) {
+    var cmd = 'sh ' + MODDIR + '/control.sh ' + args;
+    if (typeof ksu !== 'undefined') {
+      ksu.exec(cmd);
+      resolve(true);
+    } else if (typeof Magisk !== 'undefined') {
+      Magisk.exec(cmd);
+      resolve(true);
+    } else {
+      resolve(false);
+    }
+  });
 }
 
 async function loadStatus() {
   try {
-    const r = await fetch(STATUS_URL + '?t=' + Date.now());
-    if (!r.ok) return;
-    const s = await r.json();
-    
-    const stateEl = document.getElementById('stateText');
-    stateEl.textContent = s.state === 'running' ? '运行中' : s.state === 'stopped' ? '已停止' : '已禁用';
-    stateEl.className = 'status-value ' + s.state;
-    
+    var r = await fetch(STATUS_URL + '?t=' + Date.now());
+    if (!r.ok) {
+      renderStopped();
+      return;
+    }
+    var s = await r.json();
+
+    var stateEl = document.getElementById('stateText');
+    stateEl.textContent = s.state === 'running' ? '运行中' : s.state === 'stopped' ? '已停止' : s.state === 'disabled' ? '已禁用' : '错误';
+    stateEl.className = 'status-value ' + (s.state || '');
+
     document.getElementById('ipText').textContent = s.ip || '未连接';
     document.getElementById('portText').textContent = s.port || '--';
     document.getElementById('updatedText').textContent = s.updated || '--';
     document.getElementById('portInput').value = s.port || 5555;
-    
-    const toggle = document.getElementById('toggleSwitch');
-    toggle.checked = s.enabled === 1;
-    
+
+    document.getElementById('toggleSwitch').checked = s.enabled === 1;
+
     if (s.ip && s.state === 'running') {
       document.getElementById('connectCmd').textContent = 'adb connect ' + s.ip + ':' + s.port;
+    } else {
+      document.getElementById('connectCmd').textContent = 'adb connect --:--';
     }
-  } catch(e) {}
+  } catch(e) {
+    renderStopped();
+  }
+}
+
+function renderStopped() {
+  var stateEl = document.getElementById('stateText');
+  stateEl.textContent = '已停止';
+  stateEl.className = 'status-value stopped';
+  document.getElementById('ipText').textContent = '未连接';
+  document.getElementById('portText').textContent = document.getElementById('portInput').value || 5555;
+  document.getElementById('updatedText').textContent = '--';
+  document.getElementById('toggleSwitch').checked = false;
+  document.getElementById('connectCmd').textContent = 'adb connect --:--';
 }
 
 async function loadLog() {
   try {
-    const r = await fetch(LOG_URL + '?t=' + Date.now());
+    var r = await fetch(LOG_URL + '?t=' + Date.now());
     if (r.ok) {
-      const text = await r.text();
-      const area = document.getElementById('logArea');
+      var text = await r.text();
+      var area = document.getElementById('logArea');
       area.textContent = text || '暂无日志';
       area.scrollTop = area.scrollHeight;
     }
@@ -408,43 +436,40 @@ async function loadLog() {
 
 async function loadConfig() {
   try {
-    const r = await fetch(CONFIG_URL + '?t=' + Date.now());
+    var r = await fetch(CONFIG_URL + '?t=' + Date.now());
     if (r.ok) {
-      const text = await r.text();
-      const match = text.match(/ADB_PORT=(\d+)/);
+      var text = await r.text();
+      var match = text.match(/ADB_PORT=(\d+)/);
       if (match) document.getElementById('portInput').value = match[1];
-      const toggle = document.getElementById('toggleSwitch');
-      toggle.checked = !text.includes('ENABLED=0');
+      document.getElementById('toggleSwitch').checked = !text.includes('ENABLED=0');
     }
   } catch(e) {}
 }
 
-function toggleModule() {
-  const enabled = document.getElementById('toggleSwitch').checked ? 1 : 0;
-  const cmd = 'sed -i "s/ENABLED=.*/ENABLED=' + enabled + '/" ' + MODDIR + '/config';
-  if (typeof ksu !== 'undefined') {
-    ksu.exec(cmd);
-    toast(enabled ? '已启用' : '已禁用');
+async function toggleModule() {
+  var ok = await execCtrl('toggle');
+  if (ok) {
+    toast('切换中...', 1000);
     setTimeout(loadStatus, 2000);
   } else {
-    toast('需要在 KSU 管理器中操作');
-    document.getElementById('toggleSwitch').checked = !document.getElementById('toggleSwitch').checked;
+    toast('WebUI 环境不支持直接执行，请在终端中执行: sh ' + MODDIR + '/control.sh toggle', 3000);
+    // 还原开关状态，等下次 status 刷新自动修正
+    setTimeout(loadStatus, 1000);
   }
 }
 
-function savePort() {
-  const port = document.getElementById('portInput').value;
+async function savePort() {
+  var port = document.getElementById('portInput').value;
   if (!port || port < 1 || port > 65535) {
-    toast('端口无效');
+    toast('端口无效（1-65535）');
     return;
   }
-  const cmd = 'sed -i "s/ADB_PORT=.*/ADB_PORT=' + port + '/" ' + MODDIR + '/config';
-  if (typeof ksu !== 'undefined') {
-    ksu.exec(cmd);
-    toast('端口已保存: ' + port);
+  var ok = await execCtrl('set-port ' + port);
+  if (ok) {
+    toast('端口已保存: ' + port, 2000);
     setTimeout(loadStatus, 2000);
   } else {
-    toast('需要在 KSU 管理器中操作');
+    toast('WebUI 环境不支持，请在终端执行: sh ' + MODDIR + '/control.sh set-port ' + port, 4000);
   }
 }
 
